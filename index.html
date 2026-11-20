@@ -199,6 +199,18 @@ function aeParaNP(base, alvo) {
   return null;
 }
 
+// menor AR (em décimos) que leva o trimestre (NPR) a "alvo"; null = nem com 10
+function arParaTri(np, alvo) {
+  for (let v = 0; v <= 100; v++) if (dr(v + np, 2) >= alvo) return v;
+  return null;
+}
+// menor AR no trimestre n que leva a nota final à média; null = nem com 10
+function arParaFinal(tr, n, media) {
+  const outros = tr.reduce((a, x, i) => a + (i === n - 1 ? 0 : x.ef), 0), np = tr[n - 1].np;
+  for (let v = 0; v <= 100; v++) if (dr(outros + Math.max(np, dr(v + np, 2)), 3) >= media) return v;
+  return null;
+}
+
 function nivelPor(v) {
   if (v == null) return 'risco';
   if (v === 0) return 'garantida';
@@ -217,7 +229,17 @@ function analisar(d, media) {
   if (rest === 0) {
     o.nf = dr(soma, 3);
     if (o.nf >= media) { o.nivel = 'aprovada'; o.msg = 'Nota final <strong>' + fmt(o.nf) + '</strong>. Aprovada!'; }
-    else { o.nivel = 'risco'; o.final = true; o.msg = 'Nota final <strong>' + fmt(o.nf) + '</strong>, abaixo de ' + fmt(media) + '. Vai para a recuperação final.'; }
+    else {
+      const n = [3, 2, 1].find(k => tr[k - 1].np < media && d.t[k].ar == null);
+      const ar = n ? arParaFinal(tr, n, media) : null;
+      if (ar != null) {
+        o.nivel = 'foco'; o.arTri = n; o.arFinal = ar;
+        o.msg = 'Nota final <strong>' + fmt(o.nf) + '</strong>. Precisa de <strong>' + fmt(ar) + '</strong> na recuperação (AR) do ' + n + 'º trimestre para passar.';
+      } else {
+        o.nivel = 'risco'; o.final = true;
+        o.msg = 'Nota final <strong>' + fmt(o.nf) + '</strong>, abaixo de ' + fmt(media) + (n ? '. Nem com 10 na AR do ' + n + 'º trimestre fecha a média' : '') + '. Vai para a recuperação final.';
+      }
+    }
     return o;
   }
   if (!feitos.length) {
@@ -425,9 +447,14 @@ function atualizarDisc() {
       : ae == null ? ['n-risco', 'Nem com 10 na AE o trimestre chega em ' + fmt(S.media) + '. Vale se preparar para a recuperação (AR).']
       : [ae > 70 ? 'n-foco' : 'n-caminho', 'Para fechar o trimestre com ' + fmt(S.media) + ', precisa de ' + fmt(ae) + ' na AE.'];
   } else if (r.np != null && r.ef < S.media) {
-    aviso = ['n-atencao', d.t[V.tri].ar == null
-      ? 'Trimestre abaixo de ' + fmt(S.media) + '. Se fizer a recuperação, lance a nota em AR.'
-      : 'Mesmo com a recuperação, o trimestre ficou abaixo de ' + fmt(S.media) + '.'];
+    if (d.t[V.tri].ar != null) aviso = ['n-atencao', 'Mesmo com a recuperação, o trimestre ficou abaixo de ' + fmt(S.media) + '.'];
+    else {
+      const at = arParaTri(r.np, S.media);
+      let txt = at == null ? 'Nem com 10 na recuperação (AR) o trimestre chega a ' + fmt(S.media) + '.'
+        : 'Trimestre fechou em ' + fmt(r.np) + '. Para chegar a ' + fmt(S.media) + ', precisa de <strong>' + fmt(at) + '</strong> na recuperação (AR).';
+      if (a.arTri === V.tri && a.arFinal !== at) txt += ' Para passar de ano na matéria, basta <strong>' + fmt(a.arFinal) + '</strong>.';
+      aviso = [at == null || at > 70 ? 'n-foco' : 'n-atencao', txt];
+    }
   }
   $('#d-res').innerHTML = `<h3>Resultado do ${V.tri}º trimestre</h3>
     <div class="res">
