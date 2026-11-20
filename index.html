@@ -135,7 +135,7 @@ h1,h2,h3,p{margin:0}
 .res small{display:block;font-size:12px;font-weight:600;color:var(--soft)}
 .res b{font-size:24px;font-weight:900}
 .res .baixo b{color:var(--bad)}
-.aviso{margin-top:12px;padding:12px 14px;border-radius:16px;font-size:15px;font-weight:700}
+.aviso{margin-top:12px;padding:12px 14px;border-radius:16px;font-size:15px;font-weight:700;text-align:justify;hyphens:auto;-webkit-hyphens:auto}
 
 /* ajustes */
 .linha{display:flex;align-items:center;gap:8px;margin-bottom:8px}
@@ -452,7 +452,9 @@ function atualizarDisc() {
       const at = arParaTri(r.np, S.media);
       let txt = at == null ? 'Nem com 10 na recuperação (AR) o trimestre chega a ' + fmt(S.media) + '.'
         : 'Trimestre fechou em ' + fmt(r.np) + '. Para chegar a ' + fmt(S.media) + ', precisa de <strong>' + fmt(at) + '</strong> na recuperação (AR).';
-      if (a.arTri === V.tri && a.arFinal !== at) txt += ' Para passar de ano na matéria, basta <strong>' + fmt(a.arFinal) + '</strong>.';
+      if (a.arTri === V.tri && a.arFinal !== at) txt += a.arFinal < at
+        ? ' Mas, para passar na matéria, basta <strong>' + fmt(a.arFinal) + '</strong>.'
+        : ' Mas, para passar na matéria, precisa de <strong>' + fmt(a.arFinal) + '</strong>, por causa da média dos trimestres anteriores.';
       aviso = [at == null || at > 70 ? 'n-foco' : 'n-atencao', txt];
     }
   }
