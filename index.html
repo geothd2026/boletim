@@ -211,6 +211,16 @@ function arParaFinal(tr, n, media) {
   return null;
 }
 
+// o Conselho de Classe só vale se uma única matéria estiver nessa situação
+function ajustarCC(lista) {
+  const cc = lista.filter(a => a.cc);
+  if (cc.length > 1) cc.forEach(a => { a.msg = a.msg.replace(/Vai para o Conselho de Classe.*$/, 'Como há ' + cc.length + ' matérias nessa faixa, não tem Conselho de Classe.'); a.ccMulti = true; });
+  return lista;
+}
+
+function analisarTodas() { return ajustarCC(S.disc.map(d => analisar(d, S.media, S.prfMin, S.ccMin))); }
+function analiseDe(id) { return analisarTodas()[S.disc.findIndex(d => d.id === id)]; }
+
 function nivelPor(v) {
   if (v == null) return 'risco';
   if (v === 0) return 'garantida';
@@ -219,7 +229,7 @@ function nivelPor(v) {
   return 'foco';
 }
 
-function analisar(d, media) {
+function analisar(d, media, prfMin = 60, ccMin = 50) {
   const tr = TRIS.map(n => calcTri(d, n));
   const feitos = tr.filter(x => x.ef != null);
   const soma = feitos.reduce((a, x) => a + x.ef, 0);
@@ -236,8 +246,21 @@ function analisar(d, media) {
         o.nivel = 'foco'; o.arTri = n; o.arFinal = ar;
         o.msg = 'Nota final <strong>' + fmt(o.nf) + '</strong>. Precisa de <strong>' + fmt(ar) + '</strong> na recuperação (AR) do ' + n + 'º trimestre para passar.';
       } else {
-        o.nivel = 'risco'; o.final = true;
-        o.msg = 'Nota final <strong>' + fmt(o.nf) + '</strong>, abaixo de ' + fmt(media) + (n ? '. Nem com 10 na AR do ' + n + 'º trimestre fecha a média' : '') + '. Vai para a recuperação final.';
+        // recuperação final: NFR = (NF + PRF) / 2, aprovada com NFR >= prfMin; CC na faixa [ccMin, prfMin)
+        o.final = true; o.nivel = 'risco'; o.emPRF = true;
+        const base = 'Nota final <strong>' + fmt(o.nf) + '</strong>';
+        if (d.prf == null) {
+          let p = null; for (let v = 0; v <= 100; v++) if (dr(o.nf + v, 2) >= prfMin) { p = v; break; }
+          o.prfPrecisa = p;
+          o.msg = base + ', abaixo de ' + fmt(media) + '. ' + (p == null ? 'Nem com 10 na recuperação final (PRF) chega a ' + fmt(prfMin) + '.'
+            : 'Precisa de <strong>' + fmt(p) + '</strong> na recuperação final (PRF).');
+        } else {
+          o.nfr = dr(o.nf + d.prf, 2);
+          const nfr = 'Nota após a recuperação final (NFR): <strong>' + fmt(o.nfr) + '</strong>';
+          if (o.nfr >= prfMin) { o.final = false; o.nivel = 'aprovada'; o.msg = nfr + '. Aprovada na recuperação final!'; }
+          else if (o.nfr >= ccMin) { o.cc = true; /* Conselho conta a NFR, depois da PRF */ o.msg = nfr + '. Vai para o Conselho de Classe; se aprovada no Conselho, a NFR passa a ' + fmt(media) + '.'; }
+          else o.msg = nfr + ', abaixo de ' + fmt(ccMin) + '. Não alcançou a nota para o Conselho de Classe.';
+        }
       }
     }
     return o;
@@ -292,17 +315,19 @@ const PADRAO = [['Arte', false], ['Ciências Naturais', true], ['Educação Fís
 const TEMAS = { roxo: ['Roxo', '#7C3AED', '#EC4899'], oceano: ['Oceano', '#2563EB', '#0891B2'], sunset: ['Pôr do sol', '#EA580C', '#E11D74'], menta: ['Menta', '#0F766E', '#16A34A'] };
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function novoTri() { return { ap: [null, null, null], gip: null, ae: null, ar: null }; }
-function novaDisc(nome, temAE) { return { id: uid(), nome, temAE, t: { 1: novoTri(), 2: novoTri(), 3: novoTri() } }; }
-function estadoNovo() { return { v: 1, nome: '', turma: '', media: 60, tema: 'roxo', disc: PADRAO.map(p => novaDisc(p[0], p[1])) }; }
+function novaDisc(nome, temAE) { return { id: uid(), nome, temAE, prf: null, t: { 1: novoTri(), 2: novoTri(), 3: novoTri() } }; }
+function estadoNovo() { return { v: 2, nome: '', turma: '', media: 60, prfMin: 60, ccMin: 50, tema: 'roxo', disc: PADRAO.map(p => novaDisc(p[0], p[1])) }; }
 
 function nota(v) { return Number.isInteger(v) && v >= 0 && v <= 100 ? v : null; }
 function normalizar(o) {
   if (!o || !Array.isArray(o.disc)) throw new Error('formato');
-  const s = { v: 1, nome: String(o.nome || '').slice(0, 40), turma: String(o.turma || '').slice(0, 40),
-    media: nota(o.media) || 60, tema: TEMAS[o.tema] ? o.tema : 'roxo', disc: [] };
+  const novo = o.v >= 2; // v2: regra da Portaria nº 5 (24 OUT 25)
+  const s = { v: 2, nome: String(o.nome || '').slice(0, 40), turma: String(o.turma || '').slice(0, 40),
+    media: nota(o.media) || 60, prfMin: (novo && nota(o.prfMin)) || 60, ccMin: (novo && nota(o.ccMin)) || 50, tema: TEMAS[o.tema] ? o.tema : 'roxo', disc: [] };
   o.disc.forEach(d => {
     const n = novaDisc(String(d.nome || 'Disciplina').slice(0, 40), d.temAE !== false);
     if (d.id) n.id = String(d.id);
+    n.prf = nota(d.prf);
     TRIS.forEach(k => {
       const t = (d.t && d.t[k]) || {};
       n.t[k] = { ap: [0, 1, 2].map(i => nota((t.ap || [])[i])), gip: nota(t.gip), ae: nota(t.ae), ar: nota(t.ar) };
@@ -332,7 +357,7 @@ function emoji(nome) {
 }
 function corDe(a) { const c = COR[a.nivel]; return `--c:var(--${c});--c-bg:var(--${c}-bg)`; }
 const PESO = { risco: 0, foco: 1, atencao: 2, caminho: 3, garantida: 4, aprovada: 5, vazio: 6 };
-function rotulo(a) { return a.final ? '🚨 Rec. final' : ROTULO[a.nivel]; }
+function rotulo(a) { return a.cc && !a.ccMulti ? '🤝 Conselho' : a.final ? '🚨 Rec. final' : a.nfr != null ? '🎉 Aprovada (PRF)' : ROTULO[a.nivel]; }
 let tt;
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2600); }
 
@@ -350,7 +375,8 @@ function render() {
 }
 
 function telaInicio() {
-  const lista = S.disc.map((d, i) => ({ d, i, a: analisar(d, S.media) }));
+  const todas = analisarTodas();
+  const lista = S.disc.map((d, i) => ({ d, i, a: todas[i] }));
   const c = { ok: 0, warn: 0, hot: 0 };
   lista.forEach(x => {
     if (['aprovada', 'garantida', 'caminho'].includes(x.a.nivel)) c.ok++;
@@ -393,13 +419,13 @@ function celTri(n, r) {
   return `<div class="tri${baixo ? ' baixo' : ''}"><small>${n}º tri${r.npr != null && r.npr > r.np ? ' (rec)' : ''}</small><b class="num">${fmt(v)}</b></div>`;
 }
 function cartao(d, a) {
-  const fim = a.nf != null, v = fim ? a.nf : a.parcial;
+  const fim = a.nf != null, v = a.nfr != null ? a.nfr : fim ? a.nf : a.parcial;
   return `
   <button class="disc" data-disc="${d.id}" style="${corDe(a)}">
     <div class="disc-top"><span class="emo" aria-hidden="true">${emoji(d.nome)}</span><h3>${esc(d.nome)}</h3><span class="chip n-${a.nivel}">${rotulo(a)}</span></div>
     <div class="tris">
       ${TRIS.map(n => celTri(n, a.tr[n - 1])).join('')}
-      <div class="tri final"><small>${fim ? 'Final' : 'Parcial'}</small><b class="num">${fmt(v)}</b></div>
+      <div class="tri final"><small>${a.nfr != null ? 'NFR' : fim ? 'Final' : 'Parcial'}</small><b class="num">${fmt(v)}</b></div>
     </div>
     ${v == null ? '' : `<div class="prog" aria-hidden="true"><i style="width:${v}%"></i><u style="left:${S.media}%"></u></div>`}
     <p class="msg">${a.msg}</p>
@@ -430,11 +456,12 @@ function telaDisc() {
     </div>
     <p class="dica">Use vírgula ou ponto: 7,5. AR só se fizer recuperação. GIP é o bônus de participação (até 2,0), somado à média das AP.</p>
   </section>
-  <section class="painel" id="d-res"></section>`;
+  <section class="painel" id="d-res"></section>
+  <section class="painel" id="d-prf" hidden></section>`;
 }
 
 function atualizarDisc() {
-  const d = S.disc.find(x => x.id === V.id), a = analisar(d, S.media), r = a.tr[V.tri - 1];
+  const d = S.disc.find(x => x.id === V.id), a = analiseDe(V.id), r = a.tr[V.tri - 1];
   $('#d-chip').outerHTML = `<span id="d-chip" class="chip n-${a.nivel}">${rotulo(a)}</span>`;
   $('#d-msg').innerHTML = a.msg;
   $('#d-tabs').innerHTML = TRIS.map(n => `<button role="tab" data-tri="${n}" aria-selected="${n === V.tri}">
@@ -466,6 +493,23 @@ function atualizarDisc() {
     </div>
     ${aviso ? `<p class="aviso ${aviso[0]}">${aviso[1]}</p>` : ''}
     <p class="dica">${d.temAE ? 'NP = 40% da média das AP + 60% da AE.' : 'Disciplina sem AE: a NP é a média das AP.'} Vale para o boletim a maior entre NP e NPR.</p>`;
+  const pf = $('#d-prf');
+  pf.hidden = !a.emPRF;
+  if (!a.emPRF) return;
+  const foco = document.activeElement && document.activeElement.id === 'c-prf';
+  if (!foco) pf.innerHTML = `<h3>Recuperação final</h3>
+    <div class="campos"><div class="campo"><label for="c-prf">PRF</label>
+      <input id="c-prf" type="text" inputmode="decimal" autocomplete="off" maxlength="4" placeholder="–" data-f="prf" value="${d.prf == null ? '' : fmt(d.prf)}"></div></div>
+    <div id="d-prf-res"></div>`;
+  const cls = a.nfr == null ? (a.prfPrecisa == null || a.prfPrecisa > 70 ? 'n-foco' : 'n-atencao')
+    : a.nfr >= S.prfMin ? 'n-aprovada' : a.cc && !a.ccMulti ? 'n-atencao' : 'n-risco';
+  $('#d-prf-res').innerHTML = `<div class="res" style="margin-top:12px">
+      <div${b(a.nf)}><small>Nota final (NF)</small><b class="num">${fmt(a.nf)}</b></div>
+      <div><small>PRF</small><b class="num">${fmt(d.prf)}</b></div>
+      <div${a.nfr != null && a.nfr < S.prfMin ? ' class="baixo"' : ''}><small>NFR</small><b class="num">${fmt(a.nfr)}</b></div>
+    </div>
+    <p class="aviso ${cls}">${a.msg}</p>
+    <p class="dica">NFR = (NF + PRF) ÷ 2. Aprovada com NFR a partir de ${fmt(S.prfMin)}; Conselho de Classe com NFR de ${fmt(S.ccMin)} até abaixo de ${fmt(S.prfMin)}, se for a única matéria nessa faixa.</p>`;
 }
 
 function telaConfig() {
@@ -482,6 +526,10 @@ function telaConfig() {
     <div class="linha"><input id="g-turma" type="text" maxlength="40" data-g="turma" value="${esc(S.turma)}" placeholder="Ex.: 6º ano · 2026"></div>
     <label class="rot" for="g-media">Média para aprovação</label>
     <div class="linha"><input id="g-media" type="text" inputmode="decimal" maxlength="4" data-g="media" value="${fmt(S.media)}"></div>
+    <label class="rot" for="g-prf">Aprovação após a recuperação final (NFR mínima)</label>
+    <div class="linha"><input id="g-prf" type="text" inputmode="decimal" maxlength="4" data-g="prfMin" value="${fmt(S.prfMin)}"></div>
+    <label class="rot" for="g-cc">Conselho de Classe a partir de</label>
+    <div class="linha"><input id="g-cc" type="text" inputmode="decimal" maxlength="4" data-g="ccMin" value="${fmt(S.ccMin)}"></div>
   </section>
   <section class="painel">
     <h3>Cor do app</h3>
@@ -515,7 +563,7 @@ document.addEventListener('click', e => {
   if (ds.ir) { V.tela = ds.ir; render(); }
   else if (ds.disc) {
     V.tela = 'disc'; V.id = ds.disc;
-    const a = analisar(S.disc.find(d => d.id === V.id), S.media);
+    const a = analiseDe(V.id);
     const pend = TRIS.find(n => a.tr[n - 1].ef == null); V.tri = pend || 3;
     render(); atualizarDisc();
   }
@@ -531,7 +579,7 @@ document.addEventListener('click', e => {
   else if (ds.acao === 'importar') $('#arq').click();
   else if (ds.acao === 'zerar') {
     if (confirm('Apagar TODAS as notas? As disciplinas continuam. Isso não pode ser desfeito.')) {
-      S.disc.forEach(d => TRIS.forEach(n => d.t[n] = novoTri())); salvar(); toast('Notas apagadas.'); render();
+      S.disc.forEach(d => { d.prf = null; TRIS.forEach(n => d.t[n] = novoTri()); }); salvar(); toast('Notas apagadas.'); render();
     }
   }
 });
@@ -543,12 +591,12 @@ document.addEventListener('input', e => {
     if (ds.f === 'gip' && v > 20) v = undefined; // GIP vale no máximo 2,0
     el.setAttribute('aria-invalid', v === undefined);
     if (v === undefined) return;
-    const t = S.disc.find(x => x.id === V.id).t[V.tri];
-    if (ds.f === 'ap') t.ap[+ds.i] = v; else t[ds.f] = v;
+    const dd = S.disc.find(x => x.id === V.id), t = dd.t[V.tri];
+    if (ds.f === 'prf') dd.prf = v; else if (ds.f === 'ap') t.ap[+ds.i] = v; else t[ds.f] = v;
     salvar(); atualizarDisc();
-  } else if (ds.g === 'media') {
+  } else if (['media', 'prfMin', 'ccMin'].includes(ds.g)) {
     const v = ler(el.value); el.setAttribute('aria-invalid', !v);
-    if (v) { S.media = v; salvar(); }
+    if (v) { S[ds.g] = v; salvar(); }
   } else if (ds.g) { S[ds.g] = el.value; salvar(); }
   else if (ds.nome) { S.disc.find(x => x.id === ds.nome).nome = el.value || 'Disciplina'; salvar(); }
   else if (ds.ae) { S.disc.find(x => x.id === ds.ae).temAE = el.checked; salvar(); }
